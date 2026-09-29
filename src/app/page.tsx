@@ -216,11 +216,6 @@ export default function WelcomePage() {
                 className="w-full h-full object-cover object-top"
               />
               <div className="absolute inset-0 background-image: linear-gradient(var(--tw-gradient-stops)) from-ink/50 via-transparent to-transparent" />
-              <div className="absolute bottom-8 left-8 right-8">
-                <span className="font-serif text-2xl italic text-white">
-                  Every relationship is a library of stories.
-                </span>
-              </div>
             </FadeIn>
           </div>
         </section>

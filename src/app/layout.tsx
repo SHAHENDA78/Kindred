@@ -24,6 +24,7 @@ export const metadata: Metadata = {
   title: "Kindred",
   description: "Save the moment before it becomes a memory.",
   manifest: "/manifest.json",
+  colorScheme: "light",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",

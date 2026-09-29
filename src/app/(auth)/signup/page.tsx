@@ -120,7 +120,7 @@ function SignupForm() {
           <p className="relative z-10 font-serif text-xl italic text-white leading-snug">
             Every relationship is a library of stories.
           </p>
-\          <svg
+          <svg
             className="absolute bottom-0 left-0 w-full h-8 text-white"
             viewBox="0 0 400 40"
             preserveAspectRatio="none"

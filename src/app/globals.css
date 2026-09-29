@@ -1,6 +1,10 @@
 @import "tailwindcss";
 
 :root {
+  color-scheme: light;
+}
+
+:root {
   --color-ink: #2c2520;
   --color-stone: #7a7065;
   --color-line: #dfd7cc;
