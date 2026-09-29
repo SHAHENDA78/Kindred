@@ -1,0 +1,22 @@
+
+[functions.send-nudge-notifications]
+enabled = true
+verify_jwt = false
+import_map = "./functions/send-nudge-notifications/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/send-nudge-notifications/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/send-nudge-notifications/*.html" ]
+
+[functions.send-friend-request-notification]
+enabled = true
+verify_jwt = false
+import_map = "./functions/send-friend-request-notification/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/send-friend-request-notification/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/send-friend-request-notification/*.html" ]
