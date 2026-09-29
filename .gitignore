@@ -34,6 +34,8 @@ yarn-error.log*
 .env*
 .env.local
 
+
+
 # Supabase CLI local artifacts
 supabase/.branches
 supabase/.temp
