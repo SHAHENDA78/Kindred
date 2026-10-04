@@ -22,6 +22,7 @@ export default function GlobalTimelinePage() {
   const [loading, setLoading] = useState(true);
   const [circleNames, setCircleNames] = useState<Record<string, string>>({});
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [creatorNames, setCreatorNames] = useState<Record<string, string>>({});
 
   useEffect(() => {
     fetchData();
@@ -57,7 +58,25 @@ export default function GlobalTimelinePage() {
       .eq("owner_id", user.id)
       .order("created_at", { ascending: true });
 
-    setPeople(peopleData || []);
+    const linkedPeopleIds = Array.from(
+      new Set((peopleData || []).filter((p) => p.linked_user_id).map((p) => p.linked_user_id as string))
+    );
+    let livePeopleMap: Record<string, { full_name: string; avatar_url: string | null }> = {};
+    if (linkedPeopleIds.length > 0) {
+      const { data: liveProfiles } = await supabase
+        .from("profiles")
+        .select("id, full_name, avatar_url")
+        .in("id", linkedPeopleIds);
+      livePeopleMap = Object.fromEntries(
+        (liveProfiles || []).map((p) => [p.id, { full_name: p.full_name, avatar_url: p.avatar_url }])
+      );
+    }
+    const liveEnrich = <T extends { linked_user_id?: string | null; name: string; photo_url?: string | null }>(p: T): T =>
+      p.linked_user_id && livePeopleMap[p.linked_user_id]
+        ? { ...p, name: livePeopleMap[p.linked_user_id].full_name || p.name, photo_url: p.photo_url || livePeopleMap[p.linked_user_id].avatar_url }
+        : p;
+
+    setPeople((peopleData || []).map(liveEnrich));
 
     setCurrentUserId(user.id);
 
@@ -86,10 +105,28 @@ export default function GlobalTimelinePage() {
       ...((ownData as unknown as MemoryWithPerson[]) || []),
       ...sharedWithMe,
     ];
-    const memoriesList = Array.from(new Map(merged.map((m) => [m.id, m])).values()).sort(
+    const memoriesListRaw = Array.from(new Map(merged.map((m) => [m.id, m])).values()).sort(
       (a, b) => new Date(b.memory_date).getTime() - new Date(a.memory_date).getTime()
     );
+    const memoriesList = memoriesListRaw.map((m) =>
+      m.person ? { ...m, person: liveEnrich(m.person) } : m
+    );
     setMemories(memoriesList);
+
+    const creatorIds = Array.from(
+      new Set(memoriesList.map((m) => m.creator_id).filter(Boolean))
+    ) as string[];
+    if (creatorIds.length > 0) {
+      const { data: creatorProfiles } = await supabase
+        .from("profiles")
+        .select("id, full_name")
+        .in("id", creatorIds);
+      setCreatorNames(
+        Object.fromEntries(
+          (creatorProfiles || []).map((p) => [p.id, p.full_name || "Someone"])
+        )
+      );
+    }
 
     const circleIds = Array.from(
       new Set(memoriesList.map((m) => m.circle_id).filter(Boolean))
@@ -275,7 +312,7 @@ export default function GlobalTimelinePage() {
                       className={`relative group ${isRightColumn ? "md:mt-16" : ""}`}
                     >
                       <div className="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-accent ring-4 ring-accent/15 group-hover:ring-accent/30 transition-all duration-300 z-10" />
-<TimelineMemoryCard memory={memory} circleNames={circleNames} currentUserId={currentUserId} />                    </div>
+<TimelineMemoryCard memory={memory} circleNames={circleNames} currentUserId={currentUserId} creatorNames={creatorNames} />                    </div>
                   );
                 })}
               </div>
@@ -310,12 +347,15 @@ function TimelineMemoryCard({
   memory,
   circleNames,
   currentUserId,
+  creatorNames,
 }: {
   memory: MemoryWithPerson;
   circleNames: Record<string, string>;
   currentUserId: string | null;
+  creatorNames: Record<string, string>;
 }) {
   const label = shareLabel(memory, circleNames);
+  const liveCreatorName = creatorNames[memory.creator_id] || memory.creator_name;
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
 
   useEffect(() => {
@@ -333,7 +373,7 @@ function TimelineMemoryCard({
     if (currentUserId && memory.creator_id !== currentUserId) {
       return (
         <p className="text-[9px] font-bold text-accent uppercase tracking-widest mb-3">
-          From {memory.creator_name || "a friend"}
+          From {liveCreatorName || "a friend"}
         </p>
       );
     }

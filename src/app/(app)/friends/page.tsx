@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { UserPlus, X, Check, Search } from "lucide-react";
+import { UserPlus, X, Check, Search, UserMinus } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { ConnectionWithProfile } from "@/lib/types";
 
@@ -11,6 +11,7 @@ interface SearchResult {
   id: string;
   fullName: string;
   email: string | null;
+  avatarUrl: string | null;
 }
 
 interface IncomingRequest {
@@ -29,6 +30,8 @@ export default function FriendsPage() {
   const [outgoingRequestIds, setOutgoingRequestIds] = useState<Set<string>>(new Set());
   const [incomingRequests, setIncomingRequests] = useState<IncomingRequest[]>([]);
   const [respondingId, setRespondingId] = useState<string | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
 
   const [showAddFriend, setShowAddFriend] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -98,6 +101,8 @@ export default function FriendsPage() {
           avatarUrl: p.avatar_url || null,
         }))
       );
+    } else {
+      setConnections([]);
     }
 
     const { data: incomingRows } = await supabase
@@ -143,10 +148,11 @@ export default function FriendsPage() {
     setSearchedOnce(true);
 
     const supabase = createClient();
+    const q = searchQuery.trim();
     const { data } = await supabase
       .from("profiles")
-      .select("id, full_name, email")
-      .ilike("full_name", `%${searchQuery.trim()}%`)
+      .select("id, full_name, email, avatar_url")
+      .or(`full_name.ilike.%${q}%,email.ilike.%${q}%`)
       .limit(10);
 
     const results = (data || [])
@@ -155,6 +161,7 @@ export default function FriendsPage() {
         id: p.id,
         fullName: p.full_name || "Someone",
         email: p.email || null,
+        avatarUrl: p.avatar_url || null,
       }));
 
     setSearchResults(results);
@@ -213,6 +220,13 @@ export default function FriendsPage() {
 
     if (accept) {
       await supabase.rpc("accept_friend_request", { p_request_id: requestId });
+
+      try {
+        await supabase.functions.invoke("send-friend-accept-notification", {
+          body: { accepter_id: currentUserId, original_sender_id: senderId },
+        });
+      } catch {
+      }
     } else {
       await supabase
         .from("friend_requests")
@@ -226,6 +240,37 @@ export default function FriendsPage() {
     if (accept) {
       await fetchData();
     }
+  }
+
+  async function removeFriend(otherUserId: string) {
+    if (!currentUserId) return;
+    setRemovingId(otherUserId);
+
+    const supabase = createClient();
+
+    await supabase
+      .from("connections")
+      .delete()
+      .or(
+        `and(user_a.eq.${currentUserId},user_b.eq.${otherUserId}),and(user_a.eq.${otherUserId},user_b.eq.${currentUserId})`
+      );
+
+    await supabase
+      .from("friend_requests")
+      .delete()
+      .or(
+        `and(sender_id.eq.${currentUserId},receiver_id.eq.${otherUserId}),and(sender_id.eq.${otherUserId},receiver_id.eq.${currentUserId})`
+      );
+
+    setConnections((prev) => prev.filter((c) => c.connectionUserId !== otherUserId));
+    setConnectionIds((prev) => {
+      const next = new Set(prev);
+      next.delete(otherUserId);
+      return next;
+    });
+
+    setRemovingId(null);
+    setConfirmRemoveId(null);
   }
 
   function closeAddFriend() {
@@ -358,36 +403,81 @@ export default function FriendsPage() {
         ) : (
           <div className="grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:gap-8">
             {connections.map((conn, i) => (
-              <Link
+              <div
                 key={conn.connectionUserId}
-                href={`/together/${conn.connectionUserId}`}
-                className="group"
+                className="relative group"
                 style={{ transform: `rotate(${tilt(i)}deg)` }}
               >
-                <div
-                  className={`${TONES[i % TONES.length]} rounded-[1.25rem] p-3 pb-5 shadow-sm border border-line w-full sm:w-40 hover:shadow-xl hover:-translate-y-1 hover:rotate-0 transition-all duration-300`}
+                <button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setConfirmRemoveId(conn.connectionUserId);
+                  }}
+                  title="Remove friend"
+                  className="absolute -top-2 -right-2 z-10 w-7 h-7 rounded-full bg-white border border-line shadow-sm flex items-center justify-center text-stone hover:text-red-500 hover:border-red-200 transition-all opacity-0 group-hover:opacity-100"
                 >
-                  <div className="aspect-square rounded-lg bg-ink/5 border border-line/60 flex items-center justify-center mb-3 overflow-hidden">
-                    {conn.avatarUrl ? (
-                      <img src={conn.avatarUrl} alt="" className="w-full h-full object-cover" />
-                    ) : (
-                      <span className="font-serif italic text-4xl sm:text-5xl text-ink/70">
-                        {conn.fullName.charAt(0).toUpperCase()}
-                      </span>
-                    )}
+                  <UserMinus size={12} />
+                </button>
+
+                <Link href={`/together/${conn.connectionUserId}`} className="block">
+                  <div
+                    className={`${TONES[i % TONES.length]} rounded-[1.25rem] p-3 pb-5 shadow-sm border border-line w-full sm:w-40 hover:shadow-xl hover:-translate-y-1 hover:rotate-0 transition-all duration-300`}
+                  >
+                    <div className="aspect-square rounded-lg bg-ink/5 border border-line/60 flex items-center justify-center mb-3 overflow-hidden">
+                      {conn.avatarUrl ? (
+                        <img src={conn.avatarUrl} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="font-serif italic text-4xl sm:text-5xl text-ink/70">
+                          {conn.fullName.charAt(0).toUpperCase()}
+                        </span>
+                      )}
+                    </div>
+                    <p className="font-serif italic text-sm sm:text-base text-ink text-center truncate px-1">
+                      {conn.fullName}
+                    </p>
+                    <p className="text-[8px] text-accent font-bold uppercase tracking-widest text-center mt-1">
+                      Shared Story
+                    </p>
                   </div>
-                  <p className="font-serif italic text-sm sm:text-base text-ink text-center truncate px-1">
-                    {conn.fullName}
-                  </p>
-                  <p className="text-[8px] text-accent font-bold uppercase tracking-widest text-center mt-1">
-                    Shared Story
-                  </p>
-                </div>
-              </Link>
+                </Link>
+              </div>
             ))}
           </div>
         )}
       </div>
+
+      {confirmRemoveId && (
+        <div className="fixed inset-0 bg-ink/50 backdrop-blur-md flex items-center justify-center z-50 p-6">
+          <div className="w-full max-w-xs bg-cream rounded-[2rem] p-6 sm:p-7 text-center shadow-xl">
+            <div className="w-11 h-11 rounded-full bg-red-50 flex items-center justify-center text-red-500 mx-auto mb-4">
+              <UserMinus size={16} />
+            </div>
+            <h3 className="font-serif text-lg italic text-ink mb-2">Remove this friend?</h3>
+            <p className="text-stone text-xs leading-relaxed mb-6">
+              They&apos;ll disappear from your Friends list and lose access to
+              anything you&apos;ve shared with them as a friend. You can send
+              them a new request later.
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setConfirmRemoveId(null)}
+                className="flex-1 bg-white border border-line text-ink py-2.5 rounded-full text-[10px] font-bold uppercase tracking-widest"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => removeFriend(confirmRemoveId)}
+                disabled={removingId === confirmRemoveId}
+                className="flex-1 bg-red-500 text-white py-2.5 rounded-full text-[10px] font-bold uppercase tracking-widest disabled:opacity-50"
+              >
+                {removingId === confirmRemoveId ? "Removing..." : "Remove"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
             {showAddFriend && (
         <div className="fixed inset-0 bg-ink/50 backdrop-blur-md flex items-end sm:items-center justify-center z-50">
           <div className="w-full sm:max-w-sm bg-cream rounded-t-[2.5rem] sm:rounded-[2.5rem] max-h-[85vh] overflow-hidden flex flex-col">
@@ -474,8 +564,12 @@ export default function FriendsPage() {
                         key={result.id}
                         className="flex items-center gap-3 bg-white rounded-[1.25rem] p-3 shadow-sm border border-line/60"
                       >
-                        <div className="w-12 h-12 rounded-full bg-clay flex items-center justify-center font-serif italic text-ink text-lg shrink-0">
-                          {result.fullName.charAt(0).toUpperCase()}
+                        <div className="w-12 h-12 rounded-full bg-clay overflow-hidden flex items-center justify-center font-serif italic text-ink text-lg shrink-0">
+                          {result.avatarUrl ? (
+                            <img src={result.avatarUrl} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            result.fullName.charAt(0).toUpperCase()
+                          )}
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="font-serif italic text-base text-ink truncate">

@@ -104,21 +104,28 @@ function CaptureForm() {
       if (ownedPeople && ownedPeople.length > 0) {
         const linkedIds = ownedPeople.map((p) => p.linked_user_id).filter(Boolean) as string[];
         let accountAvatars: Record<string, string> = {};
+        let accountNames: Record<string, string> = {};
 
         if (linkedIds.length > 0) {
           const { data: linkedProfiles } = await supabase
             .from("profiles")
-            .select("id, avatar_url")
+            .select("id, avatar_url, full_name")
             .in("id", linkedIds);
           accountAvatars = Object.fromEntries(
             (linkedProfiles || [])
               .filter((p) => p.avatar_url)
               .map((p) => [p.id, p.avatar_url as string])
           );
+          accountNames = Object.fromEntries(
+            (linkedProfiles || [])
+              .filter((p) => p.full_name)
+              .map((p) => [p.id, p.full_name as string])
+          );
         }
 
         const peopleWithFallback = ownedPeople.map((p) => ({
           ...p,
+          name: (p.linked_user_id ? accountNames[p.linked_user_id] : null) || p.name,
           photo_url: p.photo_url || (p.linked_user_id ? accountAvatars[p.linked_user_id] : null) || null,
         }));
 
@@ -321,9 +328,13 @@ function CaptureForm() {
       durationSeconds = recordedSeconds;
     }
 
-    const creatorName =
-      user.user_metadata?.full_name || user.email?.split("@")[0] || "Someone";
-
+const { data: myProfile } = await supabase
+  .from("profiles")
+  .select("full_name")
+  .eq("id", user.id)
+  .maybeSingle();
+const creatorName =
+  myProfile?.full_name || user.user_metadata?.full_name || user.email?.split("@")[0] || "Someone";
     const { data: newMemory, error: insertError } = await supabase
       .from("memories")
       .insert({
@@ -353,6 +364,22 @@ function CaptureForm() {
       await supabase.from("memory_circles").insert(
         selectedCircleIds.map((cId) => ({ memory_id: newMemory.id, circle_id: cId }))
       );
+    }
+
+    const allCircleIds = circleId ? [circleId] : selectedCircleIds;
+    if (sharedWithPerson || allCircleIds.length > 0) {
+      try {
+        await supabase.functions.invoke("send-memory-shared-notification", {
+          body: {
+            creator_id: user.id,
+            creator_name: creatorName,
+            person_id: circleId ? null : taggedPersonId,
+            shared_with_person: sharedWithPerson,
+            circle_ids: allCircleIds,
+          },
+        });
+      } catch {
+      }
     }
 
     setSaving(false);

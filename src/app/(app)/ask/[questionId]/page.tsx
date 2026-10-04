@@ -59,9 +59,24 @@ function AskContent() {
       return;
     }
 
-    setPerson(pc.person);
-    setTemplate(pc.template);
+    let livePerson = pc.person;
+    if (pc.person?.linked_user_id) {
+      const { data: liveProfile } = await supabase
+        .from("profiles")
+        .select("full_name, avatar_url")
+        .eq("id", pc.person.linked_user_id)
+        .maybeSingle();
+      if (liveProfile) {
+        livePerson = {
+          ...pc.person,
+          name: liveProfile.full_name || pc.person.name,
+          photo_url: pc.person.photo_url || liveProfile.avatar_url || null,
+        };
+      }
+    }
 
+    setPerson(livePerson);
+    setTemplate(pc.template);
 
     setLoading(false);
   }
@@ -117,8 +132,13 @@ function AskContent() {
       return;
     }
 
+    const { data: myProfile } = await supabase
+      .from("profiles")
+      .select("full_name")
+      .eq("id", user.id)
+      .maybeSingle();
     const creatorName =
-      user.user_metadata?.full_name || user.email?.split("@")[0] || "Someone";
+      myProfile?.full_name || user.user_metadata?.full_name || user.email?.split("@")[0] || "Someone";
 
     const { data: memory } = await supabase
       .from("memories")
@@ -151,8 +171,13 @@ function AskContent() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
+    const { data: myProfile } = await supabase
+      .from("profiles")
+      .select("full_name")
+      .eq("id", user.id)
+      .maybeSingle();
     const creatorName =
-      user.user_metadata?.full_name || user.email?.split("@")[0] || "Someone";
+      myProfile?.full_name || user.user_metadata?.full_name || user.email?.split("@")[0] || "Someone";
 
     const { data: memory } = await supabase
       .from("memories")

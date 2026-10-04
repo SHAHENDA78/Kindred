@@ -59,7 +59,30 @@ export default function ChallengesPage() {
       .select("*")
       .eq("owner_id", user.id)
       .order("created_at", { ascending: true });
-    setPeople(peopleData || []);
+
+    const challengeLinkedIds = Array.from(
+      new Set((peopleData || []).filter((p) => p.linked_user_id).map((p) => p.linked_user_id as string))
+    );
+    let challengeLiveProfiles: Record<string, { full_name: string; avatar_url: string | null }> = {};
+    if (challengeLinkedIds.length > 0) {
+      const { data: liveProfiles } = await supabase
+        .from("profiles")
+        .select("id, full_name, avatar_url")
+        .in("id", challengeLinkedIds);
+      challengeLiveProfiles = Object.fromEntries(
+        (liveProfiles || []).map((p) => [p.id, { full_name: p.full_name, avatar_url: p.avatar_url }])
+      );
+    }
+    const livePeopleData = (peopleData || []).map((p) =>
+      p.linked_user_id && challengeLiveProfiles[p.linked_user_id]
+        ? {
+            ...p,
+            name: challengeLiveProfiles[p.linked_user_id].full_name || p.name,
+            photo_url: p.photo_url || challengeLiveProfiles[p.linked_user_id].avatar_url || null,
+          }
+        : p
+    );
+    setPeople(livePeopleData);
 
     const { data: globalTemplates } = await supabase
       .from("challenge_templates")
@@ -98,7 +121,7 @@ export default function ChallengesPage() {
       memoryCountByPerson[m.person_id] = (memoryCountByPerson[m.person_id] || 0) + 1;
     });
 
-    const askablePeople = (peopleData || []).filter((p) => p.linked_user_id !== user.id);
+    const askablePeople = livePeopleData.filter((p) => p.linked_user_id !== user.id);
 if (askablePeople.length > 0 && templatesData.length > 0) {
   const sortedPeople = [...askablePeople].sort(
         (a, b) =>

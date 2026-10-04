@@ -133,19 +133,32 @@ export default function ProfilePage() {
     setMessage("Profile photo removed.");
   }
 
-  async function handleSave() {
-    setSaving(true);
-    setMessage("");
-    const supabase = createClient();
-    const { error } = await supabase.auth.updateUser({ data: { full_name: name } });
+async function handleSave() {
+  setSaving(true);
+  setMessage("");
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
     setSaving(false);
-
-    if (error) {
-      setMessage("Error saving: " + error.message);
-      return;
-    }
-    setMessage("Profile updated.");
+    return;
   }
+
+  const { error: authError } = await supabase.auth.updateUser({
+    data: { full_name: name },
+  });
+
+  const { error: profileError } = await supabase
+    .from("profiles")
+    .upsert({ id: user.id, full_name: name });
+
+  setSaving(false);
+
+  if (authError || profileError) {
+    setMessage("Error saving: " + (authError?.message || profileError?.message));
+    return;
+  }
+  setMessage("Profile updated.");
+}
 
     async function handleChangePassword() {
     if (newPassword.length < 6) {

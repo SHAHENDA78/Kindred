@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { getSignedMemoryUrl } from "@/lib/getSignedMemoryUrl";
 import Link from "next/link";
-import { Camera, Play, Pause, UserPlus, Copy, Check } from "lucide-react";
+import { Camera, Play, Pause, UserPlus, Copy, Check, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Person, Memory } from "@/lib/types";
 
@@ -35,6 +35,10 @@ export default function PersonProfilePage() {
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [creatingInvite, setCreatingInvite] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [creatorNames, setCreatorNames] = useState<Record<string, string>>({});
 
   useEffect(() => {
     fetchData();
@@ -52,7 +56,23 @@ export default function PersonProfilePage() {
       router.replace("/home");
       return;
     }
-    setPerson(personData);
+
+    let livePerson = personData;
+    if (personData.linked_user_id) {
+      const { data: liveProfile } = await supabase
+        .from("profiles")
+        .select("full_name, avatar_url")
+        .eq("id", personData.linked_user_id)
+        .maybeSingle();
+      if (liveProfile) {
+        livePerson = {
+          ...personData,
+          name: liveProfile.full_name || personData.name,
+          photo_url: personData.photo_url || liveProfile.avatar_url || null,
+        };
+      }
+    }
+    setPerson(livePerson);
 
     const { data: { user } } = await supabase.auth.getUser();
 
@@ -86,6 +106,21 @@ export default function PersonProfilePage() {
       (a, b) => new Date(b.memory_date).getTime() - new Date(a.memory_date).getTime()
     );
     setMemories(memoriesList);
+
+    const creatorIds = Array.from(
+      new Set(memoriesList.map((m) => m.creator_id).filter(Boolean))
+    ) as string[];
+    if (creatorIds.length > 0) {
+      const { data: creatorProfiles } = await supabase
+        .from("profiles")
+        .select("id, full_name")
+        .in("id", creatorIds);
+      setCreatorNames(
+        Object.fromEntries(
+          (creatorProfiles || []).map((p) => [p.id, p.full_name || "Someone"])
+        )
+      );
+    }
 
     const circleIds = Array.from(
       new Set(memoriesList.map((m) => m.circle_id).filter(Boolean))
@@ -175,6 +210,57 @@ export default function PersonProfilePage() {
     navigator.clipboard.writeText(inviteLink);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  }
+
+  async function handleDeletePerson() {
+    if (!person) return;
+    setDeleting(true);
+    setDeleteError(null);
+
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    const { error: memoriesError } = await supabase
+      .from("memories")
+      .delete()
+      .eq("person_id", person.id);
+
+    if (memoriesError) {
+      setDeleting(false);
+      setDeleteError("Couldn't delete right now. Please try again.");
+      return;
+    }
+
+    await supabase.from("person_invites").delete().eq("person_id", person.id);
+
+    if (person.linked_user_id && user) {
+      await supabase
+        .from("connections")
+        .delete()
+        .or(
+          `and(user_a.eq.${user.id},user_b.eq.${person.linked_user_id}),and(user_a.eq.${person.linked_user_id},user_b.eq.${user.id})`
+        );
+      await supabase
+        .from("friend_requests")
+        .delete()
+        .or(
+          `and(sender_id.eq.${user.id},receiver_id.eq.${person.linked_user_id}),and(sender_id.eq.${person.linked_user_id},receiver_id.eq.${user.id})`
+        );
+    }
+
+    const { error: personDeleteError } = await supabase
+      .from("people")
+      .delete()
+      .eq("id", person.id);
+
+    setDeleting(false);
+
+    if (personDeleteError) {
+      setDeleteError("Couldn't delete right now. Please try again.");
+      return;
+    }
+
+    router.replace("/home");
   }
 
   if (loading || !person) {
@@ -303,6 +389,12 @@ export default function PersonProfilePage() {
                 <Check size={12} /> Joined
               </span>
             )}
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              className="flex-1 md:flex-none text-center text-stone/70 hover:text-red-500 px-6 py-2 text-[10px] font-bold uppercase tracking-widest transition-colors flex items-center justify-center gap-1.5"
+            >
+              <Trash2 size={11} /> Delete {person.name}
+            </button>
           </div>
         </div>
       </header>
@@ -376,7 +468,7 @@ export default function PersonProfilePage() {
                           className={`relative ${isRightColumn ? "md:mt-16" : ""}`}
                         >
                           <div className="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-accent z-10" />
-                          <MemoryCard memory={memory} personName={person.name} circleNames={circleNames} />
+                          <MemoryCard memory={memory} personName={person.name} circleNames={circleNames} creatorNames={creatorNames} />
                         </div>
                       );
                     })}
@@ -395,7 +487,7 @@ export default function PersonProfilePage() {
               </p>
             ) : (
               voiceMemories.map((memory) => (
-                <MemoryCard key={memory.id} memory={memory} personName={person.name} circleNames={circleNames} />
+                <MemoryCard key={memory.id} memory={memory} personName={person.name} circleNames={circleNames} creatorNames={creatorNames} />
               ))
             )}
           </div>
@@ -449,6 +541,48 @@ export default function PersonProfilePage() {
             </div>
           </div>
         )}
+
+        {showDeleteConfirm && (
+          <div className="fixed inset-0 bg-ink/60 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
+            <div className="bg-white rounded-3xl overflow-hidden max-w-sm w-full p-6 sm:p-8 text-center space-y-4">
+              <div className="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center text-red-500 mx-auto">
+                <Trash2 size={18} />
+              </div>
+              <h3 className="font-serif text-lg italic text-ink">
+                Delete {person.name}?
+              </h3>
+              <p className="text-stone text-xs leading-relaxed">
+                This removes {person.name} completely, along with every memory
+                you&apos;ve saved about them (
+                {memories.some((m) => m.person_id === person.id)
+                  ? "including photos, voices, and notes"
+                  : "nothing captured yet"}
+                ). This can&apos;t be undone.
+              </p>
+
+              {deleteError && (
+                <p className="text-red-600 text-xs bg-red-50 rounded-xl p-3">{deleteError}</p>
+              )}
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  onClick={() => setShowDeleteConfirm(false)}
+                  disabled={deleting}
+                  className="flex-1 bg-paper border border-line text-ink py-3 rounded-full text-[10px] font-bold uppercase tracking-widest disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeletePerson}
+                  disabled={deleting}
+                  className="flex-1 bg-red-500 text-white py-3 rounded-full text-[10px] font-bold uppercase tracking-widest disabled:opacity-50"
+                >
+                  {deleting ? "Deleting..." : "Delete"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </main>
   );
@@ -472,12 +606,15 @@ function MemoryCard({
   memory,
   personName,
   circleNames,
+  creatorNames,
 }: {
   memory: Memory;
   personName: string;
   circleNames: Record<string, string>;
+  creatorNames: Record<string, string>;
 }) {
   const label = shareLabel(memory, personName, circleNames);
+  const liveCreatorName = creatorNames[memory.creator_id] || memory.creator_name;
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
 
   useEffect(() => {
@@ -500,9 +637,9 @@ function MemoryCard({
           alt={memory.caption || ""}
         />
         <div className="px-1 sm:px-2">
-          {memory.creator_name && (
+          {liveCreatorName && (
             <p className="text-[9px] text-stone/70 italic mb-1">
-              Added by {memory.creator_name}
+              Added by {liveCreatorName}
             </p>
           )}
           <div className="flex justify-between items-center mb-2">
@@ -535,9 +672,9 @@ function MemoryCard({
           className="w-full aspect-[4/3] rounded-2xl sm:rounded-[1.5rem] object-cover mb-3 sm:mb-4 bg-black"
         />
         <div className="px-1 sm:px-2">
-          {memory.creator_name && (
+          {liveCreatorName && (
             <p className="text-[9px] text-stone/70 italic mb-1">
-              Added by {memory.creator_name}
+              Added by {liveCreatorName}
             </p>
           )}
           <div className="flex justify-between items-center mb-2">
@@ -556,14 +693,21 @@ function MemoryCard({
   }
 
   if (memory.type === "voice" && signedUrl) {
-    return <VoiceMemoryCard memory={memory} signedUrl={signedUrl} dateLabel={dateLabel} />;
+    return (
+      <VoiceMemoryCard
+        memory={memory}
+        signedUrl={signedUrl}
+        dateLabel={dateLabel}
+        creatorName={liveCreatorName}
+      />
+    );
   }
 
   return (
     <div className="self-start bg-paper border border-line rounded-[1.5rem] sm:rounded-[2rem] p-6 sm:p-8 italic text-center overflow-hidden">
-      {memory.creator_name && (
+      {liveCreatorName && (
         <p className="text-[9px] text-stone/70 italic mb-2 not-italic">
-          Added by {memory.creator_name}
+          Added by {liveCreatorName}
         </p>
       )}
       <p
@@ -583,10 +727,12 @@ function VoiceMemoryCard({
   memory,
   signedUrl,
   dateLabel,
+  creatorName,
 }: {
   memory: Memory;
   signedUrl: string;
   dateLabel: string;
+  creatorName?: string;
 }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -658,9 +804,9 @@ function VoiceMemoryCard({
     <div className="self-start bg-white rounded-[1.5rem] sm:rounded-[2rem] p-5 sm:p-6 shadow-sm border border-line hover:shadow-xl transition-all">
       <audio ref={audioRef} src={signedUrl} preload="metadata" className="hidden" />
 
-      {memory.creator_name && (
+      {creatorName && (
         <p className="text-[9px] text-stone/70 italic mb-2">
-          Added by {memory.creator_name}
+          Added by {creatorName}
         </p>
       )}
 

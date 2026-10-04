@@ -19,27 +19,25 @@ async function enrichWithProfilePhotos(
   supabaseClient: ReturnType<typeof createClient>,
   people: PersonWithStats[]
 ) {
-  const missingPhotoLinkedIds = Array.from(
-    new Set(
-      people
-        .filter((p) => !p.photo_url && p.linked_user_id)
-        .map((p) => p.linked_user_id as string)
-    )
+  const linkedIds = Array.from(
+    new Set(people.filter((p) => p.linked_user_id).map((p) => p.linked_user_id as string))
   );
-  if (missingPhotoLinkedIds.length === 0) return people;
+  if (linkedIds.length === 0) return people;
 
   const { data: linkedProfiles } = await supabaseClient
     .from("profiles")
-    .select("id, avatar_url")
-    .in("id", missingPhotoLinkedIds);
+    .select("id, full_name, avatar_url")
+    .in("id", linkedIds);
 
-  const avatarMap = Object.fromEntries(
-    (linkedProfiles || []).map((p) => [p.id, p.avatar_url])
-  );
+  const map = Object.fromEntries((linkedProfiles || []).map((p) => [p.id, p]));
 
   return people.map((p) =>
-    !p.photo_url && p.linked_user_id && avatarMap[p.linked_user_id]
-      ? { ...p, photo_url: avatarMap[p.linked_user_id] }
+    p.linked_user_id && map[p.linked_user_id]
+      ? {
+          ...p,
+          name: map[p.linked_user_id].full_name || p.name,
+          photo_url: p.photo_url || map[p.linked_user_id].avatar_url || null,
+        }
       : p
   );
 }
@@ -65,7 +63,16 @@ export default function HomePage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      setUserName(user.user_metadata?.full_name?.split(" ")[0] || "there");
+      const { data: myProfile } = await supabase
+  .from("profiles")
+  .select("full_name")
+  .eq("id", user.id)
+  .maybeSingle();
+setUserName(
+  myProfile?.full_name?.split(" ")[0] ||
+  user.user_metadata?.full_name?.split(" ")[0] ||
+  "there"
+);
 
       const { data: peopleData } = await supabase
         .from("people")

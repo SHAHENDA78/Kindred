@@ -16,6 +16,7 @@ export default function TogetherPage() {
   const [otherName, setOtherName] = useState("");
   const [memories, setMemories] = useState<Memory[]>([]);
   const [loading, setLoading] = useState(true);
+  const [creatorNames, setCreatorNames] = useState<Record<string, string>>({});
 
   const [myAvatarUrl, setMyAvatarUrl] = useState<string | null>(null);
   const [otherAvatarUrl, setOtherAvatarUrl] = useState<string | null>(null);
@@ -32,13 +33,12 @@ export default function TogetherPage() {
       return;
     }
 
-    setMyName(user.user_metadata?.full_name?.split(" ")[0] || "You");
-
     const { data: myProfile } = await supabase
       .from("profiles")
-      .select("avatar_url")
+      .select("full_name, avatar_url")
       .eq("id", user.id)
       .maybeSingle();
+    setMyName(myProfile?.full_name?.split(" ")[0] || "You");
     setMyAvatarUrl(myProfile?.avatar_url || null);
 
     const { data: profile } = await supabase
@@ -117,6 +117,22 @@ export default function TogetherPage() {
     );
 
     setMemories(unique);
+
+    const creatorIds = Array.from(
+      new Set(unique.map((m) => m.creator_id).filter(Boolean))
+    ) as string[];
+    if (creatorIds.length > 0) {
+      const { data: creatorProfiles } = await supabase
+        .from("profiles")
+        .select("id, full_name")
+        .in("id", creatorIds);
+      setCreatorNames(
+        Object.fromEntries(
+          (creatorProfiles || []).map((p) => [p.id, p.full_name || "Someone"])
+        )
+      );
+    }
+
     setLoading(false);
   }
 
@@ -156,7 +172,7 @@ export default function TogetherPage() {
           <div className="flex items-center justify-center mb-8">
             <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full bg-ink flex items-center justify-center font-serif italic text-3xl text-white shadow-xl border-4 border-white relative z-10 overflow-hidden">
               {myAvatarUrl ? (
-                <img src={myAvatarUrl} alt="" className="w-full h-full object-cover" />
+                <img src={myAvatarUrl} alt="" className="w-full h-full object-cover rounded-full" />
               ) : (
                 myName.charAt(0).toUpperCase()
               )}
@@ -178,10 +194,9 @@ export default function TogetherPage() {
               />
             </svg>
 
-            <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full bg-accent flex items-center justify-center font-serif italic text-3xl text-white shadow-xl border-4 border-white relative z-10">
-
+            <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full bg-accent flex items-center justify-center font-serif italic text-3xl text-white shadow-xl border-4 border-white relative z-10 overflow-hidden">
               {otherAvatarUrl ? (
-                <img src={otherAvatarUrl} alt="" className="w-full h-full object-cover" />
+                <img src={otherAvatarUrl} alt="" className="w-full h-full object-cover rounded-full" />
               ) : (
                 otherName.charAt(0).toUpperCase()
               )}
@@ -248,7 +263,7 @@ export default function TogetherPage() {
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-10">
                   {memoriesByYear[year].map((memory) => (
-                    <TogetherMemoryCard key={memory.id} memory={memory} />
+                    <TogetherMemoryCard key={memory.id} memory={memory} creatorNames={creatorNames} />
                   ))}
                 </div>
               </div>
@@ -260,8 +275,15 @@ export default function TogetherPage() {
   );
 }
 
-function TogetherMemoryCard({ memory }: { memory: Memory }) {
+function TogetherMemoryCard({
+  memory,
+  creatorNames,
+}: {
+  memory: Memory;
+  creatorNames: Record<string, string>;
+}) {
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
+  const liveCreatorName = creatorNames[memory.creator_id] || memory.creator_name;
 
   useEffect(() => {
     if (memory.media_url) {
@@ -276,7 +298,7 @@ function TogetherMemoryCard({ memory }: { memory: Memory }) {
   const shareTag = memory.circle_id ? "Shared in your circle" : "Shared directly";
   const AuthorLabel = () => (
     <p className="text-[9px] text-stone/70 italic mb-2 not-italic font-bold uppercase tracking-widest">
-      Added by {memory.creator_name || "Someone"}
+      Added by {liveCreatorName || "Someone"}
     </p>
   );
 
