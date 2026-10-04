@@ -415,7 +415,7 @@ export default function FriendsPage() {
                     setConfirmRemoveId(conn.connectionUserId);
                   }}
                   title="Remove friend"
-                  className="absolute -top-2 -right-2 z-10 w-7 h-7 rounded-full bg-white border border-line shadow-sm flex items-center justify-center text-stone hover:text-red-500 hover:border-red-200 transition-all opacity-0 group-hover:opacity-100"
+                  className="absolute -top-2 -right-2 z-10 w-7 h-7 rounded-full bg-white border border-line shadow-sm flex items-center justify-center text-stone hover:text-red-500 hover:border-red-200 transition-all"
                 >
                   <UserMinus size={12} />
                 </button>
